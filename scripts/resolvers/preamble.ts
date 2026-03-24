@@ -13,7 +13,11 @@ GSTACK_BROWSE="$GSTACK_ROOT/browse/dist"
   return `## Preamble (run first)
 
 \`\`\`bash
-${runtimeRoot}_UPD=$(${ctx.paths.binDir}/gstack-update-check 2>/dev/null || ${ctx.paths.localSkillRoot}/bin/gstack-update-check 2>/dev/null || true)
+${runtimeRoot}# Only run update check once per Claude session (skip if session file exists)
+_UPD=""
+if [ ! -f ~/.gstack/sessions/"$PPID" ]; then
+  _UPD=$(${ctx.paths.binDir}/gstack-update-check 2>/dev/null || ${ctx.paths.localSkillRoot}/bin/gstack-update-check 2>/dev/null || true)
+fi
 [ -n "$_UPD" ] && echo "$_UPD" || true
 mkdir -p ~/.gstack/sessions
 touch ~/.gstack/sessions/"$PPID"
@@ -35,10 +39,12 @@ _TEL_START=$(date +%s)
 _SESSION_ID="$$-$(date +%s)"
 echo "TELEMETRY: \${_TEL:-off}"
 echo "TEL_PROMPTED: $_TEL_PROMPTED"
-mkdir -p ~/.gstack/analytics
-echo '{"skill":"${ctx.skillName}","ts":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","repo":"'$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null || echo "unknown")'"}'  >> ~/.gstack/analytics/skill-usage.jsonl 2>/dev/null || true
-# zsh-compatible: use find instead of glob to avoid NOMATCH error
-for _PF in $(find ~/.gstack/analytics -maxdepth 1 -name '.pending-*' 2>/dev/null); do [ -f "$_PF" ] && ${ctx.paths.binDir}/gstack-telemetry-log --event-type skill_run --skill _pending_finalize --outcome unknown --session-id "$_SESSION_ID" 2>/dev/null || true; break; done
+if [ "\${_TEL:-off}" != "off" ]; then
+  mkdir -p ~/.gstack/analytics
+  echo '{"skill":"${ctx.skillName}","ts":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","repo":"'$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null || echo "unknown")'"}'  >> ~/.gstack/analytics/skill-usage.jsonl 2>/dev/null || true
+  # zsh-compatible: use find instead of glob to avoid NOMATCH error
+  for _PF in $(find ~/.gstack/analytics -maxdepth 1 -name '.pending-*' 2>/dev/null); do [ -f "$_PF" ] && ${ctx.paths.binDir}/gstack-telemetry-log --event-type skill_run --skill _pending_finalize --outcome unknown --session-id "$_SESSION_ID" 2>/dev/null || true; break; done
+fi
 \`\`\``;
 }
 
@@ -297,14 +303,17 @@ RECOMMENDATION: [what the user should do next]
 
 ## Telemetry (run last)
 
+**Only run this if the \`TELEMETRY\` value from the preamble output is NOT \`off\`.**
+If telemetry is \`off\`, skip this section entirely.
+
 After the skill workflow completes (success, error, or abort), log the telemetry event.
 Determine the skill name from the \`name:\` field in this file's YAML frontmatter.
 Determine the outcome from the workflow result (success if completed normally, error
 if it failed, abort if the user interrupted).
 
-**PLAN MODE EXCEPTION — ALWAYS RUN:** This command writes telemetry to
-\`~/.gstack/analytics/\` (user config directory, not project files). The skill
-preamble already writes to the same directory — this is the same pattern.
+**PLAN MODE EXCEPTION — ALWAYS RUN (when telemetry is enabled):** This command writes
+telemetry to \`~/.gstack/analytics/\` (user config directory, not project files). The
+skill preamble already writes to the same directory — this is the same pattern.
 Skipping this command loses session duration and outcome data.
 
 Run this bash:
